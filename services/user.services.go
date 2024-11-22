@@ -28,25 +28,42 @@ func (nus *UserService) RegisterUserService(user *domain.User) (*domain.User, er
 	// Store the User into The Database
 	newUser := domain.NewUser(user.Name, user.Email, user.Password, user.Image)
 
-	ctx, cancel := context.WithTimeout(context.Background(), time.Second*100)
-
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second*10)
+	defer cancel()
 	// Insert The User into our Database
-	_, err := nus.db.Database("youtube_db").Collection("users").InsertOne(context.Background(), newUser)
-	defer cancel()
-	if err != nil {
-		return nil, err
-	}
-
-	// Get the inserted User
 	var insertedUser *domain.User
-	err = nus.db.Database("youtube_db").Collection("users").FindOne(ctx, bson.M{"_id": newUser.ID}).Decode(&insertedUser)
-	defer cancel()
 
-	if err != nil {
+	resultChan := make(chan *domain.User)
+	errorChan := make(chan error)
+
+	go func() {
+		// Insert the User into the Database
+		_, err := nus.db.Database("youtube_db").Collection("users").InsertOne(context.Background(), newUser)
+		if err != nil {
+			errorChan <- err
+			return
+		}
+
+		// Retrieve The inseted user
+		err = nus.db.Database("youtube_db").Collection("users").FindOne(ctx, bson.M{"_id": newUser.ID}).Decode(&insertedUser)
+		if err != nil {
+			errorChan <- err
+			return
+		}
+		resultChan <- insertedUser
+
+	}()
+
+	// Wait for the result, error, or context timeout
+	select {
+	case user := <-resultChan:
+		return user, nil
+	case err := <-errorChan:
 		return nil, err
+	case <-ctx.Done():
+		return nil, ctx.Err()
 	}
 
-	return insertedUser, nil
 }
 
 // Login Service
