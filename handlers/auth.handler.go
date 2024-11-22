@@ -33,19 +33,46 @@ func (Rh *AuthHandler) RegisterUserHandler(ctx *gin.Context) {
 		)
 	}
 
-	user, err := Rh.services.RegisterUserService(user)
-	if err != nil {
-		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-		return
-	}
+	// Creating a channels to recieve results from GoRoutine
+	resultChan := make(chan *domain.User)
+	errChan := make(chan error)
 
-	ctx.JSON(
-		http.StatusOK,
-		gin.H{
-			"message": "User registered successfully",
-			"user":    user,
-		},
-	)
+	go func() {
+		user, err := Rh.services.RegisterUserService(user)
+		if err != nil {
+			errChan <- err
+			return
+		}
+		resultChan <- user
+
+	}()
+
+	// Wait for result or error
+	select {
+	case user := <-resultChan:
+		ctx.JSON(
+			http.StatusOK,
+			gin.H{
+				"message": "User registered successfully",
+				"user":    user,
+			},
+		)
+	case err := <-errChan:
+		ctx.JSON(
+			http.StatusOK,
+			gin.H{
+				"message": "User registered successfully",
+				"error":   err.Error(),
+			},
+		)
+	case <-ctx.Done():
+		ctx.JSON(
+			http.StatusGatewayTimeout,
+			gin.H{
+				"error": "Request timed out",
+			},
+		)
+	}
 }
 
 // Login Handler
