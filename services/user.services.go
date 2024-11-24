@@ -6,92 +6,157 @@ import (
 	"time"
 
 	"github.com/youtube/domain"
-	"github.com/youtube/utils"
 	"go.mongodb.org/mongo-driver/bson"
+	"go.mongodb.org/mongo-driver/bson/primitive"
 	"go.mongodb.org/mongo-driver/mongo"
 )
 
-type UserService struct {
+// User Services Struct
+
+type UserServiceStruct struct {
 	db *mongo.Client
 }
 
-func NewUserService(db *mongo.Client) *UserService {
-	// Initialize the User Collection from the Database
-	return &UserService{
+func NewUserService(db *mongo.Client) *UserServiceStruct {
+	return &UserServiceStruct{
 		db: db,
 	}
 }
 
-// Signup Service
-func (nus *UserService) RegisterUserService(user *domain.User) (*domain.User, error) {
+// Update User Service  // Nus :--- NewUserService
+func (Nus *UserServiceStruct) UpdateUserService(user *domain.User, userId *string) (*domain.User, error) {
 
-	// Store the User into The Database
-	newUser := domain.NewUser(user.Name, user.Email, user.Password, user.Image)
-
-	ctx, cancel := context.WithTimeout(context.Background(), time.Second*10)
+	// Context
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second*15)
 	defer cancel()
-	// Insert The User into our Database
-	var insertedUser *domain.User
 
-	resultChan := make(chan *domain.User)
-	errorChan := make(chan error)
+	// User Update Channel && Error Channel
+	user_update_channel := make(chan *domain.User)
+	error_channel := make(chan error)
 
 	go func() {
-		// Insert the User into the Database
-		_, err := nus.db.Database("youtube_db").Collection("users").InsertOne(context.Background(), newUser)
+		// Find the User that it exists OR not
+		var is_user_exists *domain.User
+		// fmt.Println(*userId)
+		// fmt.Println(user)
+
+		userID_in_ObjectID_form, err := primitive.ObjectIDFromHex(*userId)
 		if err != nil {
-			errorChan <- err
+			error_channel <- err
+			return
+		}
+		err = Nus.db.Database("youtube_db").Collection("users").FindOne(ctx, bson.M{"_id": userID_in_ObjectID_form}).Decode(&is_user_exists)
+		if err != nil {
+			error_channel <- err
 			return
 		}
 
-		// Retrieve The inseted user
-		err = nus.db.Database("youtube_db").Collection("users").FindOne(ctx, bson.M{"_id": newUser.ID}).Decode(&insertedUser)
+		if user.Email != "" {
+			is_user_exists.Email = user.Email
+		}
+		if user.Image != "" {
+			is_user_exists.Image = user.Image
+		}
+		if user.Name != "" {
+			is_user_exists.Name = user.Name
+		}
+		// Update the User Information
+		// upsert := true
+		// opt := options.UpdateOptions{
+		// 	Upsert: &upsert,
+		// }
+
+		_, err = Nus.db.Database("youtube_db").Collection("users").UpdateOne(
+			ctx,
+			bson.M{"_id": userID_in_ObjectID_form},
+			bson.D{
+				{
+					Key: "$set",
+					Value: bson.M{
+						"email": is_user_exists.Email,
+						"image": is_user_exists.Image,
+						"name":  is_user_exists.Name,
+					},
+				},
+			},
+			// &opt,
+		)
+
 		if err != nil {
-			errorChan <- err
+			error_channel <- err
 			return
 		}
-		resultChan <- insertedUser
-
+		user_update_channel <- is_user_exists
+		// _ , err := Nus.db.Database("youtube_db").Collection("users").UpdateOne(ctx, bson.M{"_id":"*userID"},bs)
 	}()
 
-	// Wait for the result, error, or context timeout
 	select {
-	case user := <-resultChan:
-		return user, nil
-	case err := <-errorChan:
-		return nil, err
+
+	case user_info := <-user_update_channel:
+		return user_info, nil
+
+	case get_error := <-error_channel:
+		return nil, get_error
+
 	case <-ctx.Done():
 		return nil, ctx.Err()
 	}
-
 }
 
-// Login Service
-func (nus *UserService) Login(email, password *string) (*domain.User, string, error) {
-	var user *domain.User
-	if email == nil || password == nil {
-		return nil, "", errors.New("invalid credentials")
+// Delete User
+func (Nus *UserServiceStruct) DeleteProfile(userId *string) (bool, *domain.User, error) {
+	if userId == nil {
+		return false, nil, errors.New("invalid user id")
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), time.Second*100)
-	err := nus.db.Database("youtube_db").Collection("users").FindOne(ctx, bson.M{"email": email}).Decode(&user)
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second*10)
 	defer cancel()
 
+	user_delete_channel := make(chan *domain.User)
+	errChan := make(chan error)
+
+	user_id, err := primitive.ObjectIDFromHex(*userId)
+
 	if err != nil {
-		return nil, "", err
-	}
-	// Check The Password is Valid or Not Valid
-	isPasswordValid := utils.ComparePassword(*password, user.Password)
-
-	if !isPasswordValid {
-		return nil, "", errors.New("invalid credentials")
+		errChan <- err
+		return false, nil, ctx.Err()
 	}
 
-	// Generate A JWT Token for further authentication
-	token, err := utils.Generate_JWT_Token(user.ID.String(), user.Email)
-	if err != nil {
-		return nil, "", err
-	}
+	go func() {
+		var is_user_exists *domain.User
+		err := Nus.db.Database("youtube_db").Collection("users").FindOne(ctx, bson.M{"_id": user_id}).Decode(&is_user_exists)
+		if err != nil {
+			errChan <- err
+			return
+		}
+		if is_user_exists == nil {
+			errChan <- errors.New("user not found")
+			return
+		}
+		user_delete_channel <- is_user_exists
 
-	return user, token, nil
+		_, err = Nus.db.Database("youtube_db").Collection("users").DeleteOne(ctx, bson.M{"_id": user_id})
+		if err != nil {
+			errChan <- err
+			return
+		}
+	}()
+
+	select {
+	case delete_user_info := <-user_delete_channel:
+		return true, delete_user_info, nil
+	case get_error := <-errChan:
+		return false, nil, get_error
+	case <-ctx.Done():
+		return false, nil, ctx.Err()
+	}
 }
+
+// get User Info
+// Subscribe User
+// Unsubscribe User
+
+// -- After Video API we write this
+
+// lika a Video
+// dislike a Video

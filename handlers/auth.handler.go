@@ -11,10 +11,10 @@ import (
 // import "go.mongodb.org/mongo-driver/mongo"
 
 type AuthHandler struct {
-	services *services.UserService
+	services *services.AuthService
 }
 
-func NewAuthHandler(service *services.UserService) *AuthHandler {
+func NewAuthHandler(service *services.AuthService) *AuthHandler {
 	return &AuthHandler{
 		services: service,
 	}
