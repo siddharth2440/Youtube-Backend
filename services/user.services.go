@@ -3,6 +3,7 @@ package services
 import (
 	"context"
 	"errors"
+	"sync"
 	"time"
 
 	"github.com/youtube/domain"
@@ -31,8 +32,8 @@ func (Nus *UserServiceStruct) UpdateUserService(user *domain.User, userId *strin
 	defer cancel()
 
 	// User Update Channel && Error Channel
-	user_update_channel := make(chan *domain.User)
-	error_channel := make(chan error)
+	user_update_channel := make(chan *domain.User, 1)
+	error_channel := make(chan error, 1)
 
 	go func() {
 		// Find the User that it exists OR not
@@ -93,9 +94,11 @@ func (Nus *UserServiceStruct) UpdateUserService(user *domain.User, userId *strin
 	select {
 
 	case user_info := <-user_update_channel:
+		close(user_update_channel)
 		return user_info, nil
 
 	case get_error := <-error_channel:
+		close(error_channel)
 		return nil, get_error
 
 	case <-ctx.Done():
@@ -112,8 +115,8 @@ func (Nus *UserServiceStruct) DeleteProfile(userId *string) (bool, *domain.User,
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second*10)
 	defer cancel()
 
-	user_delete_channel := make(chan *domain.User)
-	errChan := make(chan error)
+	user_delete_channel := make(chan *domain.User, 1)
+	errChan := make(chan error, 1)
 
 	user_id, err := primitive.ObjectIDFromHex(*userId)
 
@@ -144,8 +147,10 @@ func (Nus *UserServiceStruct) DeleteProfile(userId *string) (bool, *domain.User,
 
 	select {
 	case delete_user_info := <-user_delete_channel:
+		close(user_delete_channel)
 		return true, delete_user_info, nil
 	case get_error := <-errChan:
+		close(errChan)
 		return false, nil, get_error
 	case <-ctx.Done():
 		return false, nil, ctx.Err()
@@ -153,8 +158,232 @@ func (Nus *UserServiceStruct) DeleteProfile(userId *string) (bool, *domain.User,
 }
 
 // get User Info
+func (Nus *UserServiceStruct) GetUserInfo(userId *string) (*domain.User, error) {
+	var user *domain.User
+	if userId == nil {
+		return nil, errors.New("userid is required")
+	}
+
+	// Context
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second*2)
+	defer cancel()
+
+	userid_to_objectID, _ := primitive.ObjectIDFromHex(*userId)
+
+	userInfo := make(chan *domain.User, 1)
+	errorChan := make(chan error, 1)
+
+	filter := bson.M{
+		"_id": userid_to_objectID,
+	}
+
+	go func() {
+		// Find the User In the Database
+		err := Nus.db.Database("youtube_db").Collection("users").FindOne(ctx, filter).Decode(&user)
+		if err != nil {
+			errorChan <- err
+			return
+		}
+		userInfo <- user
+	}()
+
+	select {
+
+	case user := <-userInfo:
+		close(userInfo)
+		return user, nil
+	case err := <-errorChan:
+		close(errorChan)
+		return nil, err
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+}
+
 // Subscribe User
+func (Nus *UserServiceStruct) SubscribeToUser(userId, channelId *string) (*domain.User, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second*1)
+	defer cancel()
+	var user *domain.User
+	if userId == nil || channelId == nil && *userId == *channelId {
+		return nil, errors.New("error in userid mismatching or null")
+	}
+
+	// WaitGroups
+	var wg sync.WaitGroup
+	wg.Add(2)
+
+	user_ObjectID_from_hex, err := primitive.ObjectIDFromHex(*userId)
+	if err != nil {
+		return nil, err
+	}
+	channel_ObjectID_from_hex, err := primitive.ObjectIDFromHex(*channelId)
+	if err != nil {
+		return nil, err
+	}
+
+	// We can't subscribe to Ourselves
+	filterToUpdateTheUser := bson.M{
+		"_id": user_ObjectID_from_hex,
+	}
+	filterToUpdateTheChannel := bson.M{
+		"_id": channel_ObjectID_from_hex,
+	}
+
+	// Object
+	updateUser := bson.M{
+		"$addToSet": bson.M{
+			"subscribedusers": channelId,
+		},
+	}
+	updateChannel := bson.M{
+		"$inc": bson.M{
+			"subscribers": 1,
+		},
+	}
+
+	get_info_after_update := make(chan *domain.User, 1)
+	err_after_update := make(chan error, 1)
+
+	// Go Routine to Update the User
+	go func() {
+		defer wg.Done()
+		err := Nus.db.Database("youtube_id").Collection("users").FindOne(ctx, bson.M{"_id": user_ObjectID_from_hex}).Decode(&user)
+
+		if err != nil {
+			err_after_update <- err
+			return
+		}
+
+		get_info_after_update <- user
+
+		// Add the Subscription for the User to the Channel
+		err = Nus.db.Database("youtube_id").Collection("users").FindOneAndUpdate(ctx, filterToUpdateTheUser, updateUser).Decode(&user)
+		if err != nil {
+			err_after_update <- err
+			return
+		}
+		get_info_after_update <- user
+	}()
+
+	// Go Routine to Update the Chennel
+	go func() {
+
+		defer wg.Done()
+		// Increment Channels Subscribers Count
+		err := Nus.db.Database("youtube_id").Collection("users").FindOneAndUpdate(ctx, filterToUpdateTheChannel, updateChannel).Err()
+		if err != nil {
+			err_after_update <- err
+			return
+		}
+	}()
+
+	// Wait for both updates to complete
+	go func() {
+		wg.Wait()
+		close(get_info_after_update)
+		close(err_after_update)
+	}()
+
+	select {
+	case user := <-get_info_after_update:
+		return user, nil
+	case err := <-err_after_update:
+		return nil, err
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+}
+
 // Unsubscribe User
+func (Nus *UserServiceStruct) UnSubscribeToUser(userId, channelId *string) (*domain.User, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second*1)
+	defer cancel()
+	var user *domain.User
+	if userId == nil || channelId == nil && *userId == *channelId {
+		return nil, errors.New("error in userid mismatching or null")
+	}
+
+	user_ObjectID_from_hex, err := primitive.ObjectIDFromHex(*userId)
+	if err != nil {
+		return nil, err
+	}
+	channel_ObjectID_from_hex, err := primitive.ObjectIDFromHex(*channelId)
+	if err != nil {
+		return nil, err
+	}
+
+	var wg sync.WaitGroup
+	wg.Add(2)
+	filterToUpdateTheUser := bson.M{
+		"_id": user_ObjectID_from_hex,
+	}
+	filterToUpdateTheChannel := bson.M{
+		"_id": channel_ObjectID_from_hex,
+	}
+
+	// Object
+	updateUser := bson.M{
+		"$pull": bson.M{
+			"subscribedusers": channelId,
+		},
+	}
+	updateChannel := bson.M{
+		"$inc": bson.M{
+			"subscribers": -1,
+		},
+	}
+
+	get_info_after_update := make(chan *domain.User, 1)
+	err_after_update := make(chan error, 1)
+
+	// Go Routine to Update the User
+	go func() {
+		defer wg.Done()
+		err := Nus.db.Database("youtube_id").Collection("users").FindOne(ctx, bson.M{"_id": user_ObjectID_from_hex}).Decode(&user)
+
+		if err != nil {
+			err_after_update <- err
+			return
+		}
+
+		get_info_after_update <- user
+
+		// Add the Subscription for the User to the Channel
+		err = Nus.db.Database("youtube_id").Collection("users").FindOneAndUpdate(ctx, filterToUpdateTheUser, updateUser).Decode(&user)
+		if err != nil {
+			err_after_update <- err
+			return
+		}
+		get_info_after_update <- user
+	}()
+
+	// Go Routine to Update the Chennel
+	go func() {
+		defer wg.Done()
+		// Increment Channels Subscribers Count
+		err := Nus.db.Database("youtube_id").Collection("users").FindOneAndUpdate(ctx, filterToUpdateTheChannel, updateChannel).Err()
+		if err != nil {
+			err_after_update <- err
+			return
+		}
+	}()
+
+	go func() {
+		wg.Wait()
+		close(get_info_after_update)
+		close(err_after_update)
+	}()
+
+	select {
+	case user := <-get_info_after_update:
+		return user, nil
+	case err := <-err_after_update:
+		return nil, err
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+}
 
 // -- After Video API we write this
 
