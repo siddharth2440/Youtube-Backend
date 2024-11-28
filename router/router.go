@@ -4,6 +4,7 @@ import (
 	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
 	"github.com/youtube/handlers"
+	"github.com/youtube/middlewares"
 	"github.com/youtube/services"
 	"go.mongodb.org/mongo-driver/mongo"
 )
@@ -46,7 +47,7 @@ func SetupRouter(db *mongo.Client) *gin.Engine {
 	// User Routes -> Protected Routes
 
 	private := router.Group("/api/v1/user")
-	// Update Profile <- Own Profile
+	private.Use(middlewares.ChkAuth())
 	{
 		// Get User Info
 		private.GET("/:userID", userHandlers.GetProfile)
