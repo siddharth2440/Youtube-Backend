@@ -215,3 +215,44 @@ func (Ush *UserHandlerStruct) SubscribeUser(ctx *gin.Context) {
 }
 
 // Unsubscribe to an Channel
+func (Ush *UserHandlerStruct) UnSubscribe(ctx *gin.Context) {
+	var RequestBoby struct {
+		UserId string `json:"UserId"`
+	}
+
+	channelId := ctx.Param("ChannelID")
+	if err := ctx.ShouldBindJSON(&RequestBoby); err != nil {
+		ctx.JSON(http.StatusBadRequest, gin.H{
+			"error":   err.Error(),
+			"message": "Parsing me error aa rha hai",
+		})
+		return
+	}
+
+	user_data_chan := make(chan *domain.User)
+	erdata_chan := make(chan error)
+
+	go func() {
+		usr, err := Ush.userService.UnSubscribeToUser(&RequestBoby.UserId, &channelId)
+
+		if err != nil {
+			erdata_chan <- err
+			return
+		}
+		user_data_chan <- usr
+	}()
+
+	select {
+	case user := <-user_data_chan:
+		close(user_data_chan)
+		ctx.JSON(http.StatusOK, gin.H{
+			"data": user,
+		})
+	case err := <-erdata_chan:
+		close(erdata_chan)
+		ctx.JSON(http.StatusInternalServerError, gin.H{
+			"success": false,
+			"error":   err.Error(),
+		})
+	}
+}

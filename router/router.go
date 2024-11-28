@@ -61,7 +61,7 @@ func SetupRouter(db *mongo.Client) *gin.Engine {
 		private.PATCH("/subscribe/:channelid", userHandlers.SubscribeUser)
 
 		// User UnSubscribe
-		// private.POST("/:userid", userHandlers.SubscribeUser)
+		private.PATCH("/unsubscribe/:ChannelID", userHandlers.UnSubscribe)
 	}
 
 	return router
