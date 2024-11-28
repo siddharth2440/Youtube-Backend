@@ -3,10 +3,12 @@ package services
 import (
 	"context"
 	"errors"
+	"fmt"
 	"sync"
 	"time"
 
 	"github.com/youtube/domain"
+	"github.com/youtube/response"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/bson/primitive"
 	"go.mongodb.org/mongo-driver/mongo"
@@ -15,12 +17,14 @@ import (
 // User Services Struct
 
 type UserServiceStruct struct {
-	db *mongo.Client
+	db  *mongo.Client
+	res *response.GetUserInfoResponse
 }
 
 func NewUserService(db *mongo.Client) *UserServiceStruct {
 	return &UserServiceStruct{
-		db: db,
+		db:  db,
+		res: &response.GetUserInfoResponse{},
 	}
 }
 
@@ -119,13 +123,19 @@ func (Nus *UserServiceStruct) DeleteProfile(userId *string) (bool, *domain.User,
 	errChan := make(chan error, 1)
 
 	user_id, err := primitive.ObjectIDFromHex(*userId)
+	fmt.Print(user_id)
 
+	// deleteeRes := make(chan any, 1)
+	var wg sync.WaitGroup
+	wg.Add(1)
 	if err != nil {
 		errChan <- err
 		return false, nil, ctx.Err()
 	}
+	fmt.Println("Deleteting the UserId :", *userId)
 
 	go func() {
+		defer wg.Done()
 		var is_user_exists *domain.User
 		err := Nus.db.Database("youtube_db").Collection("users").FindOne(ctx, bson.M{"_id": user_id}).Decode(&is_user_exists)
 		if err != nil {
@@ -145,9 +155,12 @@ func (Nus *UserServiceStruct) DeleteProfile(userId *string) (bool, *domain.User,
 		}
 	}()
 
+	wg.Wait()
+
 	select {
 	case delete_user_info := <-user_delete_channel:
 		close(user_delete_channel)
+		// print(deleteeRes)
 		return true, delete_user_info, nil
 	case get_error := <-errChan:
 		close(errChan)
@@ -158,7 +171,7 @@ func (Nus *UserServiceStruct) DeleteProfile(userId *string) (bool, *domain.User,
 }
 
 // get User Info
-func (Nus *UserServiceStruct) GetUserInfo(userId *string) (*domain.User, error) {
+func (Nus *UserServiceStruct) GetUserInfo(userId *string) (*response.GetUserInfoResponse, error) {
 	var user *domain.User
 	if userId == nil {
 		return nil, errors.New("userid is required")
@@ -170,7 +183,7 @@ func (Nus *UserServiceStruct) GetUserInfo(userId *string) (*domain.User, error) 
 
 	userid_to_objectID, _ := primitive.ObjectIDFromHex(*userId)
 
-	userInfo := make(chan *domain.User, 1)
+	userInfo := make(chan *response.GetUserInfoResponse, 1)
 	errorChan := make(chan error, 1)
 
 	filter := bson.M{
@@ -184,7 +197,8 @@ func (Nus *UserServiceStruct) GetUserInfo(userId *string) (*domain.User, error) 
 			errorChan <- err
 			return
 		}
-		userInfo <- user
+		userDetails := Nus.res.GetDetails(user)
+		userInfo <- userDetails
 	}()
 
 	select {
@@ -200,12 +214,56 @@ func (Nus *UserServiceStruct) GetUserInfo(userId *string) (*domain.User, error) 
 	}
 }
 
+// get All Users
+func (Nus *UserServiceStruct) GetAllUsers() ([]*response.GetUserInfoResponse, error) {
+
+	var users []*domain.User
+	allChannels := make(chan []*response.GetUserInfoResponse, 1)
+	err_chan := make(chan error, 1)
+
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second*1)
+	defer cancel()
+
+	go func() {
+		cur, err := Nus.db.Database("youtube_db").Collection("users").Find(ctx, bson.M{})
+		if err != nil {
+			err_chan <- err
+			return
+		}
+
+		for cur.Next(ctx) {
+			var user *domain.User
+			err := cur.Decode(&user)
+			if err != nil {
+				err_chan <- err
+				return
+			}
+			// fmt.Printf("%v\n", user)
+			users = append(users, user)
+		}
+		users_as_response := Nus.res.GetAllUsersResponse(users)
+		allChannels <- users_as_response
+		defer cur.Close(ctx)
+	}()
+
+	select {
+	case users := <-allChannels:
+		close(allChannels)
+		return users, nil
+	case err := <-err_chan:
+		close(err_chan)
+		return nil, err
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+}
+
 // Subscribe User
 func (Nus *UserServiceStruct) SubscribeToUser(userId, channelId *string) (*domain.User, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second*1)
 	defer cancel()
 	var user *domain.User
-	if userId == nil || channelId == nil && *userId == *channelId {
+	if userId == nil || channelId == nil {
 		return nil, errors.New("error in userid mismatching or null")
 	}
 
@@ -300,7 +358,11 @@ func (Nus *UserServiceStruct) UnSubscribeToUser(userId, channelId *string) (*dom
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second*1)
 	defer cancel()
 	var user *domain.User
-	if userId == nil || channelId == nil && *userId == *channelId {
+	if userId == nil || channelId == nil {
+		return nil, errors.New("error in userid mismatching or null")
+	}
+
+	if *userId == *channelId {
 		return nil, errors.New("error in userid mismatching or null")
 	}
 

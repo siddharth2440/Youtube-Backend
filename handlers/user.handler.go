@@ -5,6 +5,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/youtube/domain"
+	"github.com/youtube/response"
 	"github.com/youtube/services"
 )
 
@@ -20,6 +21,8 @@ func NewUserHandler(userservice *services.UserServiceStruct) *UserHandlerStruct 
 }
 
 // Ush := User Service Handler
+
+// Update the User Details
 func (Ush *UserHandlerStruct) UpdateUserHandler(ctx *gin.Context) {
 
 	var user_update_body *domain.User
@@ -61,6 +64,7 @@ func (Ush *UserHandlerStruct) UpdateUserHandler(ctx *gin.Context) {
 	}
 }
 
+// Delete user Profile
 func (Ush *UserHandlerStruct) DeleteUserProfile(ctx *gin.Context) {
 	userId := ctx.Param("user_id")
 
@@ -107,3 +111,97 @@ func (Ush *UserHandlerStruct) DeleteUserProfile(ctx *gin.Context) {
 	}
 
 }
+
+// Get User Info
+func (Ush *UserHandlerStruct) GetProfile(ctx *gin.Context) {
+	userID := ctx.Param("userID")
+
+	userChan := make(chan *response.GetUserInfoResponse, 1)
+	errChan := make(chan error, 1)
+
+	go func() {
+		user, err := Ush.userService.GetUserInfo(&userID)
+		if err != nil {
+			errChan <- err
+			return
+		}
+		userChan <- user
+	}()
+
+	select {
+	case user := <-userChan:
+		ctx.JSON(http.StatusOK, gin.H{
+			"data": user,
+		})
+	case err := <-errChan:
+		ctx.JSON(http.StatusInternalServerError, gin.H{
+			"error": err.Error(),
+		})
+	}
+}
+
+// get All Channels
+func (Ush *UserHandlerStruct) GetallUsers(ctx *gin.Context) {
+	users := make(chan []*response.GetUserInfoResponse, 1)
+	errChan := make(chan error, 1)
+	go func() {
+		usrs, err := Ush.userService.GetAllUsers()
+		if err != nil {
+			errChan <- err
+			return
+		}
+		users <- usrs
+	}()
+
+	select {
+	case _users := <-users:
+		close(users)
+		ctx.JSON(http.StatusOK, gin.H{
+			"data": _users,
+		})
+	case err := <-errChan:
+		close(errChan)
+		ctx.JSON(http.StatusInternalServerError, gin.H{
+			"error": err.Error(),
+		})
+	}
+}
+
+// Subscirbe to the Channel
+func (Ush *UserHandlerStruct) SubscribeUser(ctx *gin.Context) {
+
+	userId := ctx.Param("userid")
+	var channelId string
+	if err := ctx.ShouldBindJSON(&channelId); err != nil {
+		ctx.JSON(http.StatusBadRequest, gin.H{
+			"error": err.Error(),
+		})
+		return
+	}
+
+	user_subscription_service_data := make(chan *domain.User, 1)
+	err_chan := make(chan error, 1)
+
+	go func() {
+
+		usr_details, err := Ush.userService.SubscribeToUser(&userId, &channelId)
+		if err != nil {
+			err_chan <- err
+			return
+		}
+		user_subscription_service_data <- usr_details
+	}()
+
+	select {
+	case user := <-user_subscription_service_data:
+		ctx.JSON(http.StatusOK, gin.H{
+			"data": user,
+		})
+	case err := <-err_chan:
+		ctx.JSON(http.StatusInternalServerError, gin.H{
+			"error": err.Error(),
+		})
+	}
+}
+
+// Unsubscribe to an Channel

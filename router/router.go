@@ -30,9 +30,17 @@ func SetupRouter(db *mongo.Client) *gin.Engine {
 	//Auth Routes
 	public := router.Group("/api/v1/auth")
 	{
+		// User Registration
 		public.POST("/register", authHandlers.RegisterUserHandler)
+
+		// User Login
 		public.POST("/login", authHandlers.Login)
+
+		// User Signout
 		public.GET("/signout", authHandlers.Signout)
+
+		// Get All Users
+		public.GET("/users", userHandlers.GetallUsers)
 	}
 
 	// User Routes -> Protected Routes
@@ -40,15 +48,21 @@ func SetupRouter(db *mongo.Client) *gin.Engine {
 	private := router.Group("/api/v1/user")
 	// Update Profile <- Own Profile
 	{
+		// Get User Info
+		private.GET("/:userID", userHandlers.GetProfile)
+
+		// User Update our profile
 		private.PUT("/:userID", userHandlers.UpdateUserHandler)
+
+		// User can delete our profile
 		private.DELETE("/:user_id", userHandlers.DeleteUserProfile)
+
+		// User Subscibe
+		private.POST("/:userid", userHandlers.SubscribeUser)
+
+		// User UnSubscribe
+		// private.POST("/:userid", userHandlers.SubscribeUser)
 	}
-	// Delete Profile <- Own Profile
-	// get User Info
-	// Subscribe User
-	// Unsubscribe User
-	// like a video
-	// dislike a video
 
 	return router
 }
