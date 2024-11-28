@@ -58,7 +58,7 @@ func SetupRouter(db *mongo.Client) *gin.Engine {
 		private.DELETE("/:user_id", userHandlers.DeleteUserProfile)
 
 		// User Subscibe
-		private.POST("/:userid", userHandlers.SubscribeUser)
+		private.PATCH("/subscribe/:channelid", userHandlers.SubscribeUser)
 
 		// User UnSubscribe
 		// private.POST("/:userid", userHandlers.SubscribeUser)

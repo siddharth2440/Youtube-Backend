@@ -300,23 +300,16 @@ func (Nus *UserServiceStruct) SubscribeToUser(userId, channelId *string) (*domai
 		},
 	}
 
+	fmt.Print("Yahan toh Aaya Service pe")
 	get_info_after_update := make(chan *domain.User, 1)
 	err_after_update := make(chan error, 1)
 
 	// Go Routine to Update the User
 	go func() {
 		defer wg.Done()
-		err := Nus.db.Database("youtube_id").Collection("users").FindOne(ctx, bson.M{"_id": user_ObjectID_from_hex}).Decode(&user)
-
-		if err != nil {
-			err_after_update <- err
-			return
-		}
-
-		get_info_after_update <- user
 
 		// Add the Subscription for the User to the Channel
-		err = Nus.db.Database("youtube_id").Collection("users").FindOneAndUpdate(ctx, filterToUpdateTheUser, updateUser).Decode(&user)
+		err = Nus.db.Database("youtube_db").Collection("users").FindOneAndUpdate(ctx, filterToUpdateTheUser, updateUser).Decode(&user)
 		if err != nil {
 			err_after_update <- err
 			return
@@ -326,10 +319,10 @@ func (Nus *UserServiceStruct) SubscribeToUser(userId, channelId *string) (*domai
 
 	// Go Routine to Update the Chennel
 	go func() {
-
 		defer wg.Done()
+
 		// Increment Channels Subscribers Count
-		err := Nus.db.Database("youtube_id").Collection("users").FindOneAndUpdate(ctx, filterToUpdateTheChannel, updateChannel).Err()
+		err := Nus.db.Database("youtube_db").Collection("users").FindOneAndUpdate(ctx, filterToUpdateTheChannel, updateChannel).Err()
 		if err != nil {
 			err_after_update <- err
 			return
@@ -337,16 +330,14 @@ func (Nus *UserServiceStruct) SubscribeToUser(userId, channelId *string) (*domai
 	}()
 
 	// Wait for both updates to complete
-	go func() {
-		wg.Wait()
-		close(get_info_after_update)
-		close(err_after_update)
-	}()
+	wg.Wait()
 
 	select {
 	case user := <-get_info_after_update:
+		close(get_info_after_update)
 		return user, nil
 	case err := <-err_after_update:
+		close(err_after_update)
 		return nil, err
 	case <-ctx.Done():
 		return nil, ctx.Err()

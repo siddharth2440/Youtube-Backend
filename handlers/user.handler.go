@@ -170,11 +170,16 @@ func (Ush *UserHandlerStruct) GetallUsers(ctx *gin.Context) {
 // Subscirbe to the Channel
 func (Ush *UserHandlerStruct) SubscribeUser(ctx *gin.Context) {
 
-	userId := ctx.Param("userid")
-	var channelId string
-	if err := ctx.ShouldBindJSON(&channelId); err != nil {
+	channelId := ctx.Param("channelid")
+
+	var RequestBody struct {
+		UserID string `json:"userId"`
+	}
+
+	if err := ctx.ShouldBindJSON(&RequestBody); err != nil {
 		ctx.JSON(http.StatusBadRequest, gin.H{
-			"error": err.Error(),
+			"error":   err.Error(),
+			"message": "Parsing me error aa rha hai",
 		})
 		return
 	}
@@ -183,6 +188,8 @@ func (Ush *UserHandlerStruct) SubscribeUser(ctx *gin.Context) {
 	err_chan := make(chan error, 1)
 
 	go func() {
+
+		userId := RequestBody.UserID
 
 		usr_details, err := Ush.userService.SubscribeToUser(&userId, &channelId)
 		if err != nil {
@@ -194,12 +201,15 @@ func (Ush *UserHandlerStruct) SubscribeUser(ctx *gin.Context) {
 
 	select {
 	case user := <-user_subscription_service_data:
+		close(user_subscription_service_data)
 		ctx.JSON(http.StatusOK, gin.H{
 			"data": user,
 		})
 	case err := <-err_chan:
+		close(err_chan)
 		ctx.JSON(http.StatusInternalServerError, gin.H{
-			"error": err.Error(),
+			"success": false,
+			"error":   err.Error(),
 		})
 	}
 }
