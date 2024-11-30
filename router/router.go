@@ -23,10 +23,12 @@ func SetupRouter(db *mongo.Client) *gin.Engine {
 	// create Services
 	authServices := services.NewAuthService(db)
 	userServices := services.NewUserService(db)
+	videoServices := services.NewVideoService(db)
 
 	// create Handlers
 	authHandlers := handlers.NewAuthHandler(authServices)
 	userHandlers := handlers.NewUserHandler(userServices)
+	videoHandlers := handlers.NewVideoHandler(videoServices)
 
 	//Auth Routes
 	public := router.Group("/api/v1/auth")
@@ -63,6 +65,16 @@ func SetupRouter(db *mongo.Client) *gin.Engine {
 
 		// User UnSubscribe
 		private.PATCH("/unsubscribe/:ChannelID", userHandlers.UnSubscribe)
+	}
+
+	// Video Routes
+	video_routes := router.Group("/api/v1/video")
+	video_routes.Use(middlewares.ChkAuth())
+	{
+		video_routes.POST("/upload-video", videoHandlers.PostAVideo)
+		video_routes.PUT("/update-video/:videoId", videoHandlers.UpdateVideoDetails)
+		video_routes.GET("/get-video/:videoId", videoHandlers.GetAVideoInfo)
+		video_routes.DELETE("/delete-video/:videoId", videoHandlers.DeleteTheVideo)
 	}
 
 	return router
