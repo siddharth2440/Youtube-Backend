@@ -106,8 +106,9 @@ func (Vs *VideoService) UpdateVideo(videoId *string, userId *string, video *doma
 			},
 		},
 	}
-	fmt.Print(videoId_obj)
-	fmt.Print(userid_obj)
+
+	// fmt.Print(videoId_obj)
+	// fmt.Print(userid_obj)
 
 	go func() {
 
@@ -115,6 +116,42 @@ func (Vs *VideoService) UpdateVideo(videoId *string, userId *string, video *doma
 		err := Vs.Db.Database("youtube_db").Collection("videos").FindOne(ctx, filter).Decode(&update_the_video)
 		if err != nil {
 			err_channel <- err
+			return
+		}
+
+		if video.ImgURL != "" {
+			update_the_video.ImgURL = video.ImgURL
+		}
+
+		if video.ImgURL != "" {
+			update_the_video.VideoURL = video.VideoURL
+		}
+		if video.Title != "" {
+			update_the_video.Title = video.Title
+		}
+
+		if video.Desc != "" {
+			update_the_video.Desc = video.Desc
+		}
+		if video.Tags != nil {
+			update_the_video.Tags = video.Tags
+		}
+
+		updateQuery := bson.M{
+			// "$set": update_the_video,
+			"$inc": bson.M{
+				"views": 1,
+			},
+		}
+
+		res, err := Vs.Db.Database("youtube_db").Collection("videos").UpdateOne(ctx, filter, updateQuery)
+
+		if err != nil {
+			err_channel <- err
+			return
+		}
+		if res.MatchedCount == 0 {
+			err_channel <- fmt.Errorf("could not find the video in the database to update")
 			return
 		}
 		update_video_into_channel <- update_the_video

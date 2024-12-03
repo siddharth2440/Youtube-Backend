@@ -139,7 +139,7 @@ func (Nvh *VideoHandler) UpdateVideoDetails(ctx *gin.Context) {
 	}
 }
 
-// Delete the Video Details
+// Delete the Video Details   ---->
 func (Nvh *VideoHandler) DeleteTheVideo(ctx *gin.Context) {
 	videoID := ctx.Param("videoID")
 
@@ -150,7 +150,7 @@ func (Nvh *VideoHandler) DeleteTheVideo(ctx *gin.Context) {
 	)
 }
 
-// Get The Random Videos
+// Get The Random Videos  ---->
 func (Nvh *VideoHandler) RandomVideos(ctx *gin.Context) {
 	//TODO
 }
@@ -160,12 +160,12 @@ func (Nvh *VideoHandler) AddView(ctx *gin.Context) {
 	//TODO
 }
 
-// Get By Tags
+// Get By Tags ---->
 func (Nvh *VideoHandler) GetVideosByTags(ctx *gin.Context) {
 	//TODO
 }
 
-// Search a Video
+// Search a Video ---->
 func (Nvh *VideoHandler) SearchAVideo(ctx *gin.Context) {
 	//TODO
 }
